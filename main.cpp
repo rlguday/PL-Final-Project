@@ -4,6 +4,8 @@
 #include <map>
 #include <memory>
 #include <cctype>
+#include <unordered_set>  
+
 using namespace std;
 
 enum TokenType {
@@ -71,12 +73,19 @@ public:
 
 class VariableDeclarationNode : public ASTNode {
 public:
-    string varName;
+    string varName;  
+    unique_ptr<ASTNode> initializer;
 
-    explicit VariableDeclarationNode(const string &name) : varName(name) {}
+    VariableDeclarationNode(const string &name, unique_ptr<ASTNode> init = nullptr)
+        : varName(name), initializer(move(init)) {}
 
     void generateBytecode(int &labelCounter) const override {
         cout << "DECLARE_VAR " << varName << endl;
+
+        if (initializer) {
+            initializer->generateBytecode(labelCounter);
+            cout << "ASSIGN " << varName << endl;
+        }
     }
 };
 
@@ -335,66 +344,164 @@ private:
 
 class Parser {
 public:
-    Parser(const vector<Token> &tokens) : tokens(tokens), pos(0) {}
+    Parser(const vector<Token> &tokens) : tokens(tokens), pos(0) {
+        declaredVariablesStack.push_back(unordered_set<string>());
+    }
 
     vector<unique_ptr<ASTNode>> parse() {
         vector<unique_ptr<ASTNode>> ast;
 
-        while (pos < tokens.size()) {
-            Token token = tokens[pos];
-            if (token.type == IPAHAYAG) {
-                ast.push_back(parseVariableDeclaration());
-            } else if (token.type == IDENTIFIER && tokens[pos + 1].type == ASSIGNMENT) {
-                ast.push_back(parseAssignment());
-            } else if (token.type == KAPAG) {
-                ast.push_back(parseConditional());
-            } else if (token.type == PARA_SA) {
-                ast.push_back(parseForLoop());
-            } else if (token.type == HABANG) {
-                ast.push_back(parseWhileLoop());
-            } else {
-                pos++;
+        try {
+            while (pos < tokens.size()) {
+                Token token = tokens[pos];
+
+                if (token.type == IPAHAYAG) {
+                    ast.push_back(parseVariableDeclaration());
+                } else if (token.type == IDENTIFIER && tokens[pos + 1].type == ASSIGNMENT) {
+                    ast.push_back(parseAssignment());
+                } else if (token.type == KAPAG) {
+                    ast.push_back(parseConditional());
+                } else if (token.type == PARA_SA) {
+                    ast.push_back(parseForLoop());
+                } else if (token.type == HABANG) {
+                    ast.push_back(parseWhileLoop());
+                } else {
+                    pos++;
+                }
             }
+        } catch (const runtime_error &e) {
+            cout << e.what() << endl;
+            exit(EXIT_FAILURE);
         }
+
+        if (!errorMessages.empty()) {
+            for (const string &errMsg : errorMessages) {
+                cout << errMsg << endl;
+            }
+            cout << "Parsing stopped due to critical errors.\n";
+            exit(EXIT_FAILURE);
+        }
+
         return ast;
     }
 
 private:
     vector<Token> tokens;
     size_t pos;
+    vector<string> errorMessages;
+    vector<unordered_set<string>> declaredVariablesStack;
 
     unique_ptr<ASTNode> parseVariableDeclaration() {
-        pos++;
-        if (tokens[pos].type == IDENTIFIER) {
-            string varName = tokens[pos].value;
+        if (tokens[pos].type == IPAHAYAG) {
             pos++;
-            if (tokens[pos].type == ASSIGNMENT) {
+
+            if (tokens[pos].type == IDENTIFIER) {
+                string varName = tokens[pos].value;
+
+                if (declaredVariablesStack.empty()) {
+                    errorMessages.push_back("Internal error: No scope available for variable declaration.");
+                    throw runtime_error("Parsing stopped due to internal error: Scope stack is empty.");
+                }
+
+                if (declaredVariablesStack.back().find(varName) != declaredVariablesStack.back().end()) {
+                    errorMessages.push_back("Error: Variable '" + varName + "' is already declared in the current scope.\n");
+                    throw runtime_error("Parsing stopped due to variable '" + varName + "' already declared.");
+                }
+
+                declaredVariablesStack.back().insert(varName);
                 pos++;
-                auto expr = parseExpression();
-                if (tokens[pos].type == SEMICOLON) pos++;
-                return make_unique<AssignmentNode>(varName, move(expr));
+
+                unique_ptr<ASTNode> initializer;
+                if (tokens[pos].type == ASSIGNMENT) {
+                    pos++;
+                    initializer = parseExpression();
+                }
+
+                if (tokens[pos].type == SEMICOLON) {
+                    pos++;
+                } else {
+                    errorMessages.push_back("Error: Missing semicolon after variable declaration.\n");
+                    throw runtime_error("Parsing stopped due to missing semicolon after assignment to variable '" + varName + "'.");
+                }
+
+                return make_unique<VariableDeclarationNode>(varName, move(initializer));
+            } else {
+                errorMessages.push_back("Error: Expected identifier after 'ipahayag'.\n");
+                throw runtime_error("Parsing stopped due to missing variable name.");
             }
-            if (tokens[pos].type == SEMICOLON) pos++;
-            return make_unique<VariableDeclarationNode>(varName);
         }
+
         return nullptr;
     }
 
     unique_ptr<ASTNode> parseAssignment() {
         string varName = tokens[pos].value;
+
+        if (declaredVariablesStack.empty()) {
+            errorMessages.push_back("Internal error: Variable declaration stack is empty. 2");
+            throw runtime_error("Internal error: Variable declaration stack is empty. 3");
+        }
+
+        bool isDeclared = false;
+        for (auto it = declaredVariablesStack.rbegin(); it != declaredVariablesStack.rend(); ++it) {
+            if (it->find(varName) != it->end()) {
+                isDeclared = true;
+                break;
+            }
+        }
+
+        if (!isDeclared) {
+            errorMessages.push_back("Error: Variable '" + varName + "' is not declared before assignment.");
+            throw runtime_error("Parsing stopped due to undeclared variable usage: '" + varName + "'.");
+        }
+
         pos += 2;
         auto expr = parseExpression();
-        if (tokens[pos].type == SEMICOLON) pos++;
+
+        if (tokens[pos].type != SEMICOLON) {
+            errorMessages.push_back("Error: Missing semicolon after assignment to variable '" + varName + "'.");
+            throw runtime_error("Parsing stopped due to missing semicolon after assignment to variable '" + varName + "'.");
+        }
+        pos++;
+
         return make_unique<AssignmentNode>(varName, move(expr));
+    }
+
+
+
+    bool isVariableDeclared(const string &varName) {
+        for (auto it = declaredVariablesStack.rbegin(); it != declaredVariablesStack.rend(); ++it) {
+            if (it->find(varName) != it->end()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     unique_ptr<ASTNode> parseExpression() {
         auto left = parsePrimary();
 
+        if (tokens[pos - 1].type == IDENTIFIER) {
+            string varName = tokens[pos - 1].value;
+            if (!isVariableDeclared(varName)) {
+                errorMessages.push_back("Error: Variable '" + varName + "' is not declared before use.\n");
+                throw runtime_error("Parsing stopped due to variable '" + varName + "' is not declared before use.\n");
+            }
+        }
+
         while (tokens[pos].type == OPERATOR || tokens[pos].type == COMPARISON) {
             string op = tokens[pos].value;
             pos++;
             auto right = parsePrimary();
+
+            if (tokens[pos - 1].type == IDENTIFIER) {
+                string varName = tokens[pos - 1].value;
+                if (!isVariableDeclared(varName)) {
+                    errorMessages.push_back("Error: Variable '" + varName + "' is not declared before use.\n");
+                    throw runtime_error("Parsing stopped due to variable '" + varName + "' is not declared before use.\n");
+                }
+            }
+
             if (tokens[pos - 1].type == COMPARISON) {
                 left = make_unique<ComparisonNode>(op, move(left), move(right));
             } else {
@@ -421,10 +528,15 @@ private:
             auto condition = parseExpression();
             if (tokens[pos].type == CLOSE_PAREN) {
                 pos++;
+            } else {
+                errorMessages.push_back("Error: Missing closing parenthesis in conditional statement.");
+                throw runtime_error("Parsing stopped due to missing closing parenthesis.");
             }
 
             vector<unique_ptr<ASTNode>> ifBody;
             vector<unique_ptr<ASTNode>> elseBody;
+
+            declaredVariablesStack.push_back(unordered_set<string>());
 
             if (tokens[pos].type == OPEN_BRACE) {
                 pos++;
@@ -434,18 +546,25 @@ private:
                 pos++;
             }
 
+            declaredVariablesStack.pop_back();
+
             vector<pair<unique_ptr<ASTNode>, vector<unique_ptr<ASTNode>>>> elseIfBranches;
             while (tokens[pos].type == PAG_IBA_KUNG) {
                 pos++;
-
                 if (tokens[pos].type == OPEN_PAREN) {
                     pos++;
                     auto elseIfCondition = parseExpression();
                     if (tokens[pos].type == CLOSE_PAREN) {
                         pos++;
+                    } else {
+                        errorMessages.push_back("Error: Missing closing parenthesis in else-if condition.");
+                        throw runtime_error("Parsing stopped due to missing closing parenthesis.");
                     }
 
                     vector<unique_ptr<ASTNode>> elseIfBody;
+
+                    declaredVariablesStack.push_back(unordered_set<string>());
+
                     if (tokens[pos].type == OPEN_BRACE) {
                         pos++;
                         while (tokens[pos].type != CLOSE_BRACE) {
@@ -454,12 +573,17 @@ private:
                         pos++;
                     }
 
+                    declaredVariablesStack.pop_back();
+
                     elseIfBranches.push_back({move(elseIfCondition), move(elseIfBody)});
                 }
             }
 
             if (tokens[pos].type == PAG_IBA) {
                 pos++;
+
+                declaredVariablesStack.push_back(unordered_set<string>());
+
                 if (tokens[pos].type == OPEN_BRACE) {
                     pos++;
                     while (tokens[pos].type != CLOSE_BRACE) {
@@ -467,6 +591,8 @@ private:
                     }
                     pos++;
                 }
+
+                declaredVariablesStack.pop_back();
             }
 
             auto node = make_unique<ConditionalNode>();
@@ -474,10 +600,13 @@ private:
             node->ifBody = move(ifBody);
             node->elseIfBranches = move(elseIfBranches);
             node->elseBody = move(elseBody);
+
             return node;
         }
+
         return nullptr;
     }
+
 
     unique_ptr<ASTNode> parseStatement() {
         if (tokens[pos].type == IPAHAYAG) return parseVariableDeclaration();
@@ -485,7 +614,7 @@ private:
         if (tokens[pos].type == KAPAG) return parseConditional();
         if (tokens[pos].type == PARA_SA) return parseForLoop();
         if (tokens[pos].type == HABANG) return parseWhileLoop();
-        if (tokens[pos].type == IDENTIFIER && 
+        if (tokens[pos].type == IDENTIFIER &&
             (tokens[pos + 1].type == OPERATOR && (tokens[pos + 1].value == "++" || tokens[pos + 1].value == "--"))) {
             string varName = tokens[pos].value;
             string op = tokens[pos + 1].value; 
@@ -526,33 +655,55 @@ private:
         pos++;
 
         if (tokens[pos].type == OPEN_PAREN) {
-            pos++; 
+            pos++;
 
-            auto initialization = parseAssignment();  
+            unique_ptr<ASTNode> initialization;
+            if (tokens[pos].type == IPAHAYAG) {
+                initialization = parseVariableDeclaration();
+            } else {
+                initialization = parseAssignment();
+            }
+            
+            if (tokens[--pos].type != SEMICOLON) {
+                errorMessages.push_back("Error: Missing semicolon after initialization in 'para_sa' loop.");
+                throw runtime_error("Parsing stopped due to missing semicolon after '"+ tokens[pos].value +"'");
+            }
+            pos++;  
 
-            auto condition = parseExpression();  
-            if (tokens[pos].type == SEMICOLON) pos++;
+            auto condition = parseExpression();
+
+            if (tokens[pos].type != SEMICOLON) {
+                errorMessages.push_back("Error: Missing semicolon after condition in 'para_sa' loop.");
+                throw runtime_error("Parsing stopped due to missing semicolon after conditional expression.");
+            }
+            pos++;
 
             unique_ptr<ASTNode> increment;
             if (tokens[pos].type == IDENTIFIER && (tokens[pos + 1].value == "++" || tokens[pos + 1].value == "--")) {
                 string varName = tokens[pos].value;
                 string op = tokens[pos + 1].value;
-                pos += 2; 
+                pos += 2;
                 increment = make_unique<UnaryOperationNode>(varName, op);
             } else {
                 increment = parseAssignment();
             }
 
-            if (tokens[pos].type == CLOSE_PAREN) pos++;  
+            if (tokens[pos].type != CLOSE_PAREN) {
+                errorMessages.push_back("Error: Missing closing parenthesis ')' in 'para_sa' loop.");
+                throw runtime_error("Parsing stopped due to missing closing parenthesis");
+            }
+            pos++;
 
             vector<unique_ptr<ASTNode>> body;
-
             if (tokens[pos].type == OPEN_BRACE) {
-                pos++;  
+                pos++;
                 while (tokens[pos].type != CLOSE_BRACE) {
                     body.push_back(parseStatement());
                 }
                 pos++;
+            } else {
+                errorMessages.push_back("Error: Missing '{' for the body of 'para_sa' loop.");
+                throw runtime_error("Parsing stopped due to missing loop body.");
             }
 
             auto loopNode = make_unique<ForLoopNode>();
@@ -560,25 +711,30 @@ private:
             loopNode->condition = move(condition);
             loopNode->increment = move(increment);
             loopNode->body = move(body);
+
             return loopNode;
         }
-        return nullptr;
+
+        errorMessages.push_back("Error: Missing opening parenthesis '(' in 'para_sa' loop.");
+        throw runtime_error("Parsing stopped due to invalid loop syntax.");
     }
+
+    void checkSemicolon() {
+        if (tokens[pos].type != SEMICOLON) {
+            errorMessages.push_back("Error: Missing semicolon at the end of the statement.");
+            throw runtime_error("Parsing stopped due to missing semicolon at the end of the statement.");
+        }
+        pos++;
+    }
+
 
 };
 
 int main() {
     string sourceCode = R"(
         ipahayag x = 10;
-
-        kapag (x > 10) {
-            y = y + 1;
-        } 
-        pag_iba_kung (x == 5) {
-            y = y - 1;
-        } 
-        pag_iba {
-            y = 0;
+        para_sa (ipahayag i = 0; i < 10; i++) {
+            x = x + 1;
         }
     )";
 
@@ -626,10 +782,16 @@ int main() {
     Parser parser(tokens);
     auto ast = parser.parse();
 
-    cout << "Generated Bytecode:\n";
-    int labelCounter = 0;
-    for (const auto &node : ast) {
-        node->generateBytecode(labelCounter);
+    if (!ast.empty()) {
+        cout << "Generated Bytecode:\n";
+        int labelCounter = 0;
+        for (const auto &node : ast) {
+            if (node) {
+                node->generateBytecode(labelCounter);
+            }
+        }
+    } else {
+        cout << "No valid AST nodes generated.\n";
     }
 
     return 0;
