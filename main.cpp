@@ -207,41 +207,43 @@ public:
     vector<unique_ptr<ASTNode>> elseBody;
 
     void generateBytecode(int &labelCounter) const override {
-        int currentLabel = labelCounter++;
-        int endLabel = labelCounter;
+        int startLabel = labelCounter++;
+        int endLabel = labelCounter++;
 
-        cout << "IF_CONDITION_START_" << currentLabel << endl;
-        condition->generateBytecode(currentLabel);
-        cout << "JUMP_IF_FALSE ELSE_IF_" << currentLabel << endl;
+        cout << "IF_CONDITION_START_" << startLabel << endl;
+        condition->generateBytecode(labelCounter);
+        
+        int elseLabel = labelCounter++;
+        cout << "JUMP_IF_FALSE ELSE_" << elseLabel << endl;
 
         for (const auto &stmt : ifBody) {
-            if (stmt)
-                stmt->generateBytecode(currentLabel);
+            if (stmt) stmt->generateBytecode(labelCounter);
         }
         cout << "JUMP END_IF_" << endLabel << endl;
 
-        int elseIfLabel = 0;
         for (const auto &elseIfBranch : elseIfBranches) {
-            cout << "ELSE_IF_" << elseIfLabel << ":" << endl;
-            elseIfBranch.first->generateBytecode(currentLabel);
-            cout << "JUMP_IF_FALSE ELSE_IF_" << elseIfLabel + 1 << endl;
+            cout << "ELSE_" << elseLabel << ":" << endl; 
+            elseIfBranch.first->generateBytecode(labelCounter);
+            int nextElseLabel = labelCounter++;
+            cout << "JUMP_IF_FALSE ELSE_" << nextElseLabel << endl;
 
             for (const auto &stmt : elseIfBranch.second) {
-                if (stmt)
-                    stmt->generateBytecode(currentLabel);
+                if (stmt) stmt->generateBytecode(labelCounter);
             }
             cout << "JUMP END_IF_" << endLabel << endl;
-            elseIfLabel++;
+            elseLabel = nextElseLabel;
         }
 
-        cout << "ELSE_IF_" << elseIfLabel << ":" << endl;
+        cout << "ELSE_" << elseLabel << ":" << endl;
         for (const auto &stmt : elseBody) {
-            if (stmt)
-                stmt->generateBytecode(currentLabel);
+            if (stmt) stmt->generateBytecode(labelCounter);
         }
+
         cout << "END_IF_" << endLabel << ":" << endl;
     }
 };
+
+
 
 class ForLoopNode : public ASTNode {
 public:
@@ -806,6 +808,7 @@ private:
 
             auto condition = parseExpression(); // Parse condition
 
+            // Ensure semicolon after condition
             checkSemicolon(pos, "Parsing stopped due to missing semicolon at the end of para_sa test condition.");
             pos++;
 
@@ -915,11 +918,17 @@ private:
 
 int main() {
     string sourceCode = R"(
-        ipahayag zxc = 123;
-        zxc = 1 + "nikka";
+        ipahayag a = 1;
+        kapag(a == 10) {
+            a = 2;
+        }
+        pag_iba_kung(a == 20) {
+            a = 123;
+            kapag(a == 10) {
+                a = 2;
+            }
+        }
     )";
-
-    
 
     Lexer lexer(sourceCode);
     auto tokens = lexer.tokenize();
