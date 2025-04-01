@@ -281,16 +281,18 @@ public:
         : condition(move(cond)), body(move(bodyStmts)) {}
 
     void generateBytecode(int &labelCounter) const override {
-        cout << "LOOP_START:" << endl;
+        int currentLabel = labelCounter++;
+
+        cout << "LOOP_START_" << currentLabel << ":" << endl;
         condition->generateBytecode(labelCounter); 
-        cout << "JUMP_IF_FALSE LOOP_END" << endl;
+        cout << "JUMP_IF_FALSE LOOP_END_" << currentLabel << endl;
 
         for (const auto &stmt : body) {
             stmt->generateBytecode(labelCounter);
         }
 
-        cout << "JUMP LOOP_START" << endl;
-        cout << "LOOP_END:" << endl;
+        cout << "JUMP LOOP_START_" << currentLabel << endl;
+        cout << "LOOP_END_" << currentLabel << ":" << endl;
     }
 };
 
@@ -920,23 +922,11 @@ private:
 
 int main() {
     string sourceCode = R"(
-        para_sa(ipahayag x = 0; x < 100; x++) {
-            para_sa(ipahayag y = 0; y < 100; y++) {
-                para_sa(ipahayag z = 0; z < 100; z++) {
-                    kapag(x > 10) {
-                        y = 0;
-                    }
-                    pag_iba_kung(y > 10) {
-                        x = 0;
-                        para_sa(ipahayag x1 = 0; x1 < 100; x1++) {
-
-                        }
-                    }
-                    pag_iba {
-                        z = x + y + z;
-                    }
-                    print(x,y,z);
-                } 
+        ipahayag x = 1;
+        habang (x < 100) {
+            ipahayag y = 1;
+            habang(y < 100) {
+                print(x,y);
             }
         }
     )"; 
