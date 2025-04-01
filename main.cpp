@@ -253,11 +253,13 @@ public:
     vector<unique_ptr<ASTNode>> body;
 
     void generateBytecode(int &labelCounter) const override {
+        int currentLabel = labelCounter++;
+
         initialization->generateBytecode(labelCounter);
-        cout << "LOOP_START:" << endl;
+        cout << "LOOP_START_" << currentLabel <<  ":" << endl;
 
         condition->generateBytecode(labelCounter);
-        cout << "JUMP_IF_FALSE LOOP_END" << endl;
+        cout << "JUMP_IF_FALSE LOOP_END_" << currentLabel << endl;
 
         for (const auto &stmt : body) {
             if (stmt)
@@ -265,8 +267,8 @@ public:
         }
 
         increment->generateBytecode(labelCounter);
-        cout << "JUMP LOOP_START" << endl;
-        cout << "LOOP_END:" << endl;
+        cout << "JUMP LOOP_START_" << currentLabel << endl;
+        cout << "LOOP_END_" << currentLabel <<  ":" << endl;
     }
 };
 
@@ -918,20 +920,26 @@ private:
 
 int main() {
     string sourceCode = R"(
-        ipahayag a = 1;
-        kapag(a == 10) {
-            a = 2 - 5;
-        }
-        pag_iba_kung(a == 20) {
-            a = 123;
-            kapag(a == 10) {
-                a = 2;
-            }
-            a = 321 + 234 + 111;
-        }
-    )";
+        para_sa(ipahayag x = 0; x < 100; x++) {
+            para_sa(ipahayag y = 0; y < 100; y++) {
+                para_sa(ipahayag z = 0; z < 100; z++) {
+                    kapag(x > 10) {
+                        y = 0;
+                    }
+                    pag_iba_kung(y > 10) {
+                        x = 0;
+                        para_sa(ipahayag x1 = 0; x1 < 100; x1++) {
 
-        
+                        }
+                    }
+                    pag_iba {
+                        z = x + y + z;
+                    }
+                    print(x,y,z);
+                } 
+            }
+        }
+    )"; 
 
     Lexer lexer(sourceCode);
     auto tokens = lexer.tokenize();
