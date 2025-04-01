@@ -618,7 +618,7 @@ private:
                 throw runtime_error("Parsing stopped due to variable incompatible types.\n");
             }
 
-            if (tokens[pos - 1].type == COMPARISON) {
+            if (tokens[pos - 2].type == COMPARISON) {
                 left = make_unique<ComparisonNode>(op, move(left), move(right));
             } else {
                 left = make_unique<BinaryExpressionNode>(op, move(left), move(right));
@@ -920,15 +920,18 @@ int main() {
     string sourceCode = R"(
         ipahayag a = 1;
         kapag(a == 10) {
-            a = 2;
+            a = 2 - 5;
         }
         pag_iba_kung(a == 20) {
             a = 123;
             kapag(a == 10) {
                 a = 2;
             }
+            a = 321 + 234 + 111;
         }
     )";
+
+        
 
     Lexer lexer(sourceCode);
     auto tokens = lexer.tokenize();
