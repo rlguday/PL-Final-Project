@@ -577,6 +577,8 @@ private:
     }
 
     unique_ptr<ASTNode> parseExpression() {
+        int typeFlags = 0x0; 
+
         auto left = parsePrimary();
 
         if (tokens[pos - 1].type == IDENTIFIER) {
@@ -585,6 +587,10 @@ private:
                 errorMessages.push_back("Error: Variable '" + varName + "' is not declared before use.\n");
                 throw runtime_error("Parsing stopped due to variable '" + varName + "' is not declared before use.\n");
             }
+        } else if (tokens[pos - 1].type == NUMBER) {
+                typeFlags |= 0x1 << 0;
+        } else if (tokens[pos - 1].type == STRING) {
+            typeFlags |= 0x1 << 1;
         }
 
         while (tokens[pos].type == OPERATOR || tokens[pos].type == COMPARISON) {
@@ -598,6 +604,16 @@ private:
                     errorMessages.push_back("Error: Variable '" + varName + "' is not declared before use.\n");
                     throw runtime_error("Parsing stopped due to variable '" + varName + "' is not declared before use.\n");
                 }
+            } else if (tokens[pos - 1].type == NUMBER) {
+                typeFlags |= 0x1 << 0;
+            }
+            else if (tokens[pos - 1].type == STRING) {
+                typeFlags |= 0x1 << 1;
+            }
+
+            if (typeFlags == 0x3) {
+                errorMessages.push_back("Error: Incompatible types\n");
+                throw runtime_error("Parsing stopped due to variable incompatible types.\n");
             }
 
             if (tokens[pos - 1].type == COMPARISON) {
@@ -613,6 +629,8 @@ private:
     unique_ptr<ASTNode> parsePrimary() {
         if (tokens[pos].type == NUMBER) {
             return make_unique<NumberNode>(tokens[pos++].value);
+        } else if (tokens[pos].type == STRING) {
+            return make_unique<StringLiteralNode>(tokens[pos++].value);
         } else if (tokens[pos].type == IDENTIFIER) {
             return make_unique<VariableReferenceNode>(tokens[pos++].value);
         }
@@ -898,19 +916,7 @@ private:
 int main() {
     string sourceCode = R"(
         ipahayag zxc = 123;
-        kapag (zxc > 100) {
-            print("HELLO");
-        }
-        pag_iba_kung (zxc < 100) {
-            print("HELLO", zxc);
-        }
-        pag_iba {
-            print(zxc);
-        }
-
-        habang(zxc > 100) {
-            print("xD");
-        }
+        zxc = 1 + "nikka";
     )";
 
     
