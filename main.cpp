@@ -9,17 +9,17 @@
 using namespace std;
 
 enum TokenType {
-    IPAHAYAG,    // intention to declare a variable
-    KAPAG,       // IF statement
-    PAG_IBA_KUNG, // ELSE_IF statement
-    PAG_IBA,      // ELSE
-    PARA_SA,      // FOR LOOP
-    HABANG,       // WHILE LOOP
-    IDENTIFIER,   // variable names
-    NUMBER,       // Numbers
-    OPERATOR,     // +, -, *, /
-    COMPARISON,   // >, <, >=, <=, ==, !=
-    ASSIGNMENT,   // =
+    IPAHAYAG = 5,    // intention to declare a variable
+    KAPAG = 20,       // IF statement
+    PAG_IBA_KUNG = 35, // ELSE_IF statement
+    PAG_IBA = 40,      // ELSE
+    PARA_SA = 43,      // FOR LOOP
+    HABANG = 47,       // WHILE LOOP
+    IDENTIFIER = 100,   // variable names
+    NUMBER = 144,       // Numbers
+    OPERATOR = 223,     // +, -, *, /
+    COMPARISON = 234,   // >, <, >=, <=, ==, !=
+    ASSIGNMENT = 346,   // =
     OPEN_PAREN,   // (
     CLOSE_PAREN,  // )
     OPEN_BRACE,   // {
@@ -588,13 +588,7 @@ private:
                 if (tokens[pos].type == ASSIGNMENT) {
                     pos++; // move after "="
 
-                    // if (tokens[pos].type == STRING) {
-                    //     initializer = make_unique<StringLiteralNode>(tokens[pos].value); // Assume StringNode handles string literals
-                    //     newVar->type = STRING;
-                    //     pos++;
-                    // } else {
                     initializer = parseExpression(newVar.get());
-                    // } 
 
                     newVar->hasInitializer = true;
                 }
@@ -626,8 +620,10 @@ private:
             throw runtime_error("Parsing stopped due to undeclared variable usage: '" + varName + "'.");
         }
 
+        Variable *containerVar = retrieveVariable(varName);
+
         pos += 2;
-        auto expr = parseExpression();
+        auto expr = parseExpression(nullptr, containerVar);
 
         setVariableIsInitialized(varName);
 
@@ -639,8 +635,12 @@ private:
         return make_unique<AssignmentNode>(varName, move(expr));
     }
 
-    unique_ptr<ASTNode> parseExpression(Variable * newVar = nullptr) {
+    unique_ptr<ASTNode> parseExpression(Variable * newVar = nullptr, Variable *containerVar = nullptr) {
         int typeFlags = 0x0; 
+
+        if (containerVar  && (containerVar->type != UNKNOWN)) {
+            typeFlags |= containerVar->type;
+        }
 
         auto left = parsePrimary();
 
@@ -657,7 +657,14 @@ private:
             }
 
             Variable* rVar = retrieveVariable(varName);
-            typeFlags |= rVar->type;
+
+            if (rVar->type != UNKNOWN) {
+                typeFlags |= rVar->type;
+            }
+            else {
+                errorMessages.push_back("Error: Variable '" + rVar->varName + "' is declared but not initialized.");
+                throw runtime_error("Parsing stopped due to uninitialized variable '" + rVar->varName + "' usage.");
+            }
         } else if (tokens[pos - 1].type == NUMBER) {
             typeFlags |= NUMBER;
         } else if (tokens[pos - 1].type == STRING) {
@@ -682,13 +689,20 @@ private:
                 }
 
                 Variable* rVar = retrieveVariable(varName);
-                typeFlags |= rVar->type;
+                if (rVar->type != UNKNOWN) {
+                    typeFlags |= rVar->type;
+                }
+                else {
+                    errorMessages.push_back("Error: Variable '" + rVar->varName + "' is declared but not initialized.");
+                    throw runtime_error("Parsing stopped due to uninitialized variable '" + rVar->varName + "' usage.");
+                }
             } else if (tokens[pos - 1].type == NUMBER) {
                 typeFlags |= NUMBER;
             }
             else if (tokens[pos - 1].type == STRING) {
                 typeFlags |= STRING;
             }
+
 
             if (typeFlags == (NUMBER|STRING)) {
                 errorMessages.push_back("Error: Incompatible types\n");
@@ -705,6 +719,9 @@ private:
         if (!(typeFlags == (NUMBER|STRING))) {
             if (newVar) {
                 newVar->type = TokenType(typeFlags);
+            } 
+            else if (containerVar  && (containerVar->type == UNKNOWN)) {
+                containerVar->type = TokenType(typeFlags);
             }
         } else {
             errorMessages.push_back("Error: Incompatible types\n");
@@ -1003,25 +1020,35 @@ private:
 
 int main() {
     string sourceCode = R"(
-        ipahayag x = "HELLO";
-        ipahayag y = "WORLD";
-        ipahayag z = "KEK";
+        ipahayag x = 10;
+        ipahayag y = x;
+        ipahayag z;
+ 
+        z = 10;
 
-        ipahayag a = x + y + "hello";
-        z = a + x + y + z;
-        z = z + 10;
+        kapag (x < 10) {
+            ipahayag x = 23;
+
+            ipahayag y = 10 + x;
+
+            para_sa(y = 10; y < 100; y++) {
+                print(y,x,z);
+            }
+
+            z = x + y;
+        }
+        pag_iba_kung(y < 100) {
+            habang (x < 123123) {
+                print(z);
+            }
+        }
+
+        ipahayag qwe = 123;
+
+        habang(qwe < "123") {
+        
+        }
     )"; 
-
-    // ipahayag x = 10;
-    //     ipahayag y = x;
-    //     ipahayag z;
-
-    //     kapag (x < 10) {
-    //         z = x + y;
-    //     }
-    //     pag_iba_kung(y < 100) {
-    //         print(z);
-    //     }
 
     Lexer lexer(sourceCode);
     auto tokens = lexer.tokenize();
