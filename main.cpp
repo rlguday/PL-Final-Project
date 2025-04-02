@@ -299,7 +299,8 @@ public:
         cout << "JUMP_IF_FALSE LOOP_END_" << currentLabel << endl;
 
         for (const auto &stmt : body) {
-            stmt->generateBytecode(labelCounter);
+            if (stmt)
+                stmt->generateBytecode(labelCounter);
         }
 
         cout << "JUMP LOOP_START_" << currentLabel << endl;
@@ -427,6 +428,22 @@ public:
                 tokens.push_back({OPERATOR, string(1, source[pos])});
                 pos++;
             } else if (string("><!=&|").find(source[pos]) != string::npos) { // Comparison or logical operators
+                if (source[pos] == '<') {
+                    if (pos + 1 < source.length() && source[pos + 1] == '=') {
+                        tokens.push_back({COMPARISON, "<="});
+                        pos += 2;
+
+                        continue;
+                    }
+                } else if (source[pos] == '>') {
+                    if (pos + 1 < source.length() && source[pos + 1] == '=') {
+                        tokens.push_back({COMPARISON, ">="});
+                        pos += 2;
+
+                        continue;
+                    }
+                }
+
                 tokens.push_back({COMPARISON, string(1, source[pos])});
                 pos++;
             } else if (source[pos] == '(') { // Parenthesis
@@ -658,7 +675,7 @@ private:
 
             Variable* rVar = retrieveVariable(varName);
 
-            if (rVar->type != UNKNOWN) {
+            if (rVar && (rVar->type != UNKNOWN)) {
                 typeFlags |= rVar->type;
             }
             else {
@@ -689,7 +706,7 @@ private:
                 }
 
                 Variable* rVar = retrieveVariable(varName);
-                if (rVar->type != UNKNOWN) {
+                if (rVar && (rVar->type != UNKNOWN)) {
                     typeFlags |= rVar->type;
                 }
                 else {
@@ -727,7 +744,6 @@ private:
             errorMessages.push_back("Error: Incompatible types\n");
             throw runtime_error("Parsing stopped due to variable incompatible types.\n");
         }
-
         return left;
     }
 
@@ -1020,33 +1036,45 @@ private:
 
 int main() {
     string sourceCode = R"(
-        ipahayag x = 10;
-        ipahayag y = x;
-        ipahayag z;
- 
-        z = 10;
+        ipahayag a = 5;
+        ipahayag b = 10;
+        ipahayag sum;
+        ipahayag counter = 1;
 
-        kapag (x < 10) {
-            ipahayag x = 23;
+        sum = a + b;
+        print("Sum: ", sum);
 
-            ipahayag y = 10 + x;
-
-            para_sa(y = 10; y < 100; y++) {
-                print(y,x,z);
+        kapag (sum >= 15) {
+            print("Sum is greater than or equal to 15");
+            
+            ipahayag result = 1;
+            
+            habang (counter <= 5) {
+                result = result * counter;
+                print("Factorial step: ", result);
+                counter = counter + 1;
             }
 
-            z = x + y;
-        }
-        pag_iba_kung(y < 100) {
-            habang (x < 123123) {
-                print(z);
+            kapag (result > 100) {
+                print("Factorial result is greater than 100");
+            } pag_iba_kung (result == 120) {
+                print("Factorial result is exactly 120!");
+            } pag_iba {
+                print("Factorial result is less than 100");
             }
+        } kung_hindi {
+            print("Sum is less than 15");
         }
 
-        ipahayag qwe = 123;
+        ipahayag x = 20;
+        ipahayag y = 10;
 
-        habang(qwe < "123") {
-        
+        kapag (x > y) {
+            print("x is greater than y");
+        } pag_iba_kung (x == y) {
+            print("x is equal to y");
+        } pag_iba {
+            print("x is less than y");
         }
     )"; 
 
