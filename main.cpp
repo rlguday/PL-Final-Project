@@ -254,8 +254,6 @@ public:
     }
 };
 
-
-
 class ForLoopNode : public ASTNode {
 public:
     unique_ptr<ASTNode> initialization;
