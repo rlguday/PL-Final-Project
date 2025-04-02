@@ -338,15 +338,6 @@ bool isVariableInitialized(const string &varName) {
         }
     }
     return false;
-
-    // for (const auto &var : declaredVariablesStack.back()) {
-    //     if (var->varName == varName) {
-    //         if (var->hasInitializer) {
-    //             return true;
-    //         }
-    //     }
-    // }
-    // return false;
 }
 
 void setVariableIsInitialized(const string &varName) {
@@ -596,11 +587,6 @@ private:
                     newVar->hasInitializer = hasInitializer;
                 }
 
-                // if (!hasInitializer) {
-                    // errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
-                    // throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
-                // }
-
                 if (command == REQUIRE_SEMICOLON && tokens[pos].type == SEMICOLON) {
                     pos++;
                 } else if (command == REQUIRE_SEMICOLON) {
@@ -643,7 +629,6 @@ private:
 
     unique_ptr<ASTNode> parseExpression() {
         int typeFlags = 0x0; 
-        Variable *varOut;
 
         auto left = parsePrimary();
 
@@ -866,11 +851,6 @@ private:
             if (tokens[pos].type == IPAHAYAG) {
                 string varName = tokens[pos + 1].value;
 
-                // if (isVariableDeclared(varName)) {
-                //     errorMessages.push_back("Error: Variable '" + varName + "' is already declared in an outer scope.\n");
-                //     throw runtime_error("Parsing stopped due to variable '" + varName + "' redeclaration.");
-                // }
-
                 initialization = parseVariableDeclaration(IGNORE_SEMICOLON);
             } else {
                 initialization = parseAssignment(IGNORE_SEMICOLON);
@@ -1000,22 +980,11 @@ int main() {
         ipahayag y = x;
         ipahayag z;
 
-        z = 123;
         kapag (x < 10) {
-            ipahayag x = 23;
-
-            ipahayag y = 10 + x;
-
-            para_sa(ipahayag y = 10; y < 100; y++) {
-                print(y);
-            }
-
             z = x + y;
         }
         pag_iba_kung(y < 100) {
-            habang (x < 123123) {
-                print(z);
-            }
+            print(z);
         }
     )"; 
 
