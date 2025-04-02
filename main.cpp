@@ -36,7 +36,18 @@ enum Command {
     REQUIRE_SEMICOLON
 };
 
-vector<unordered_set<string>> declaredVariablesStack;
+struct Variable {
+    string varName;
+    bool hasInitializer;
+
+    Variable(const string& name, bool initialized) 
+        : varName(name), hasInitializer(initialized) {}
+};
+
+vector<vector<unique_ptr<Variable>>> declaredVariablesStack;
+bool isVarDeclaredInCurrentScope(const string &varName);
+bool isVariableDeclared(const string &varName);
+void setVariableIsInitialized(const string &varName);
 
 class ASTNode {
 public:
@@ -120,7 +131,7 @@ public:
 
 class VariableReferenceNode : public ASTNode {
 public:
-    string varName;
+    const string varName;
 
     explicit VariableReferenceNode(const string &name) : varName(name) {}
 
@@ -129,10 +140,8 @@ public:
     }
 
     string evaluate() override {
-        for (auto it = declaredVariablesStack.rbegin(); it != declaredVariablesStack.rend(); ++it) {
-            if (it->find(varName) != it->end()) {
-                return varName;
-            }
+        if (isVariableDeclared(varName)) {
+            return varName;
         }
         
         throw runtime_error("Undefined variable: " + varName);
@@ -318,6 +327,59 @@ public:
     }
 };
 
+bool isVariableInitialized(const string &varName) {
+    for (auto it = declaredVariablesStack.rbegin(); it != declaredVariablesStack.rend(); ++it) {
+        for (const auto &var : *it) {
+            if (var->varName == varName) {
+                if (var->hasInitializer) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+
+    // for (const auto &var : declaredVariablesStack.back()) {
+    //     if (var->varName == varName) {
+    //         if (var->hasInitializer) {
+    //             return true;
+    //         }
+    //     }
+    // }
+    // return false;
+}
+
+void setVariableIsInitialized(const string &varName) {
+    for (auto it = declaredVariablesStack.rbegin(); it != declaredVariablesStack.rend(); ++it) {
+        for (const auto &var : *it) {
+            if (var->varName == varName) {
+                var->hasInitializer = true;
+                return;
+            }
+        }
+    }
+}
+
+bool isVarDeclaredInCurrentScope(const string &varName) {
+    for (const auto &var : declaredVariablesStack.back()) {
+        if (var->varName == varName) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isVariableDeclared(const string &varName) {
+    for (auto it = declaredVariablesStack.rbegin(); it != declaredVariablesStack.rend(); ++it) {
+        for (const auto &var : *it) {
+            if (var->varName == varName) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 struct Token {
     TokenType type;
     string value;
@@ -467,7 +529,7 @@ private:
 class Parser {
 public:
     Parser(const vector<Token> &tokens) : tokens(tokens), pos(0) {
-        declaredVariablesStack.push_back(unordered_set<string>());
+        declaredVariablesStack.emplace_back();
     }
 
     vector<unique_ptr<ASTNode>> parse() {
@@ -506,10 +568,10 @@ private:
                 string varName = tokens[pos].value;
 
                 if (declaredVariablesStack.empty()) {
-                throw runtime_error("Internal error: Variable declaration stack is empty.");
-            }
-
-                if (declaredVariablesStack.back().find(varName) != declaredVariablesStack.back().end()) {
+                    throw runtime_error("Internal error: Variable declaration stack is empty.");
+                }
+                
+                if (isVarDeclaredInCurrentScope(varName)) {
                     errorMessages.push_back("Error: Variable '" + varName + "' is already declared in the current scope.\n");
                     throw runtime_error("Parsing stopped due to variable '" + varName + "' redeclaration.");
                 }
@@ -517,6 +579,8 @@ private:
                 pos++; // move after identifier
 
                 unique_ptr<ASTNode> initializer;
+                unique_ptr<Variable> newVar = make_unique<Variable>(varName, false);;
+
                 bool hasInitializer = false;
 
                 if (tokens[pos].type == ASSIGNMENT) {
@@ -529,12 +593,13 @@ private:
                         initializer = parseExpression();
                     }
                     hasInitializer = true;
+                    newVar->hasInitializer = hasInitializer;
                 }
 
-                if (!hasInitializer) {
-                    errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
-                    throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
-                }
+                // if (!hasInitializer) {
+                    // errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
+                    // throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
+                // }
 
                 if (command == REQUIRE_SEMICOLON && tokens[pos].type == SEMICOLON) {
                     pos++;
@@ -542,8 +607,9 @@ private:
                     errorMessages.push_back("Error: Missing semicolon after variable declaration.\n");
                     throw runtime_error("Parsing stopped due to missing semicolon after assignment to variable '" + varName + "'.");
                 }
+                
+                declaredVariablesStack.back().push_back(move(newVar));
 
-                declaredVariablesStack.back().insert(varName);
                 return make_unique<VariableDeclarationNode>(varName, move(initializer));
             } else {
                 errorMessages.push_back("Error: Expected identifier after 'ipahayag'.\n");
@@ -565,6 +631,8 @@ private:
         pos += 2;
         auto expr = parseExpression();
 
+        setVariableIsInitialized(varName);
+
         if (tokens[pos].type != SEMICOLON && command == REQUIRE_SEMICOLON) {
             errorMessages.push_back("Error: Missing semicolon after assignment to variable '" + varName + "'.");
             throw runtime_error("Parsing stopped due to missing semicolon after assignment to variable '" + varName + "'.");
@@ -573,17 +641,9 @@ private:
         return make_unique<AssignmentNode>(varName, move(expr));
     }
 
-    bool isVariableDeclared(const string &varName) {
-        for (auto it = declaredVariablesStack.rbegin(); it != declaredVariablesStack.rend(); ++it) {
-            if (it->find(varName) != it->end()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     unique_ptr<ASTNode> parseExpression() {
         int typeFlags = 0x0; 
+        Variable *varOut;
 
         auto left = parsePrimary();
 
@@ -593,8 +653,13 @@ private:
                 errorMessages.push_back("Error: Variable '" + varName + "' is not declared before use.\n");
                 throw runtime_error("Parsing stopped due to variable '" + varName + "' is not declared before use.\n");
             }
+
+            if (!isVariableInitialized(varName)) {
+                errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
+                throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
+            }
         } else if (tokens[pos - 1].type == NUMBER) {
-                typeFlags |= 0x1 << 0;
+            typeFlags |= 0x1 << 0;
         } else if (tokens[pos - 1].type == STRING) {
             typeFlags |= 0x1 << 1;
         }
@@ -609,6 +674,11 @@ private:
                 if (!isVariableDeclared(varName)) {
                     errorMessages.push_back("Error: Variable '" + varName + "' is not declared before use.\n");
                     throw runtime_error("Parsing stopped due to variable '" + varName + "' is not declared before use.\n");
+                }
+
+                if (!isVariableInitialized(varName)) {
+                    errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
+                    throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
                 }
             } else if (tokens[pos - 1].type == NUMBER) {
                 typeFlags |= 0x1 << 0;
@@ -659,7 +729,7 @@ private:
             vector<unique_ptr<ASTNode>> ifBody;
             vector<unique_ptr<ASTNode>> elseBody;
 
-            declaredVariablesStack.push_back(unordered_set<string>());
+            declaredVariablesStack.emplace_back();
 
             if (tokens[pos].type == OPEN_BRACE) {
                 pos++;
@@ -686,7 +756,7 @@ private:
 
                     vector<unique_ptr<ASTNode>> elseIfBody;
 
-                    declaredVariablesStack.push_back(unordered_set<string>());
+                    declaredVariablesStack.emplace_back();
 
                     if (tokens[pos].type == OPEN_BRACE) {
                         pos++;
@@ -705,7 +775,7 @@ private:
             if (tokens[pos].type == PAG_IBA) {
                 pos++;
 
-                declaredVariablesStack.push_back(unordered_set<string>());
+                declaredVariablesStack.emplace_back();
 
                 if (tokens[pos].type == OPEN_BRACE) {
                     pos++;
@@ -796,10 +866,10 @@ private:
             if (tokens[pos].type == IPAHAYAG) {
                 string varName = tokens[pos + 1].value;
 
-                if (isVariableDeclared(varName)) {
-                    errorMessages.push_back("Error: Variable '" + varName + "' is already declared in an outer scope.\n");
-                    throw runtime_error("Parsing stopped due to variable '" + varName + "' redeclaration.");
-                }
+                // if (isVariableDeclared(varName)) {
+                //     errorMessages.push_back("Error: Variable '" + varName + "' is already declared in an outer scope.\n");
+                //     throw runtime_error("Parsing stopped due to variable '" + varName + "' redeclaration.");
+                // }
 
                 initialization = parseVariableDeclaration(IGNORE_SEMICOLON);
             } else {
@@ -879,7 +949,11 @@ private:
                 string varName = tokens[pos].value;
                 if (!isVariableDeclared(varName)) {
                     errorMessages.push_back("Error: Variable '" + varName + "' is not declared before using postfix operation.\n");
-                    throw runtime_error("Parsing stopped due to usage of undeclared variable '" + varName + "'.");
+                    throw runtime_error("Parsing stopped due to usage of undeclared variable '" + varName + "'. qweqwe");
+                }
+                if (!isVariableInitialized(varName)) {
+                    errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
+                    throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
                 }
                 arguments.push_back(make_unique<VariableReferenceNode>(tokens[pos].value));
                 pos++;
@@ -922,11 +996,25 @@ private:
 
 int main() {
     string sourceCode = R"(
-        ipahayag x = 1;
-        habang (x < 100) {
-            ipahayag y = 1;
-            habang(y < 100) {
-                print(x,y);
+        ipahayag x = 10;
+        ipahayag y = x;
+        ipahayag z;
+
+        z = 123;
+        kapag (x < 10) {
+            ipahayag x = 23;
+
+            ipahayag y = 10 + x;
+
+            para_sa(ipahayag y = 10; y < 100; y++) {
+                print(y);
+            }
+
+            z = x + y;
+        }
+        pag_iba_kung(y < 100) {
+            habang (x < 123123) {
+                print(z);
             }
         }
     )"; 
