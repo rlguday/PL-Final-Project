@@ -39,15 +39,17 @@ enum Command {
 struct Variable {
     string varName;
     bool hasInitializer;
+    TokenType type;
 
-    Variable(const string& name, bool initialized) 
-        : varName(name), hasInitializer(initialized) {}
+    Variable(const string& name, bool initialized, TokenType type) 
+        : varName(name), hasInitializer(initialized), type(type) {}
 };
 
 vector<vector<unique_ptr<Variable>>> declaredVariablesStack;
 bool isVarDeclaredInCurrentScope(const string &varName);
 bool isVariableDeclared(const string &varName);
 void setVariableIsInitialized(const string &varName);
+Variable* retrieveVariable(const string &varName);
 
 class ASTNode {
 public:
@@ -371,6 +373,17 @@ bool isVariableDeclared(const string &varName) {
     return false;
 }
 
+Variable* retrieveVariable(const string &varName) {
+    for (auto it = declaredVariablesStack.rbegin(); it != declaredVariablesStack.rend(); ++it) {
+        for (const auto &var : *it) {
+            if (var->varName == varName) {
+                return var.get();
+            }
+        }
+    }
+    return nullptr;
+}
+
 struct Token {
     TokenType type;
     string value;
@@ -570,21 +583,20 @@ private:
                 pos++; // move after identifier
 
                 unique_ptr<ASTNode> initializer;
-                unique_ptr<Variable> newVar = make_unique<Variable>(varName, false);;
-
-                bool hasInitializer = false;
+                unique_ptr<Variable> newVar = make_unique<Variable>(varName, false, UNKNOWN);
 
                 if (tokens[pos].type == ASSIGNMENT) {
                     pos++; // move after "="
 
-                    if (tokens[pos].type == STRING) {
-                        initializer = make_unique<StringLiteralNode>(tokens[pos].value); // Assume StringNode handles string literals
-                        pos++;
-                    } else {
-                        initializer = parseExpression();
-                    }
-                    hasInitializer = true;
-                    newVar->hasInitializer = hasInitializer;
+                    // if (tokens[pos].type == STRING) {
+                    //     initializer = make_unique<StringLiteralNode>(tokens[pos].value); // Assume StringNode handles string literals
+                    //     newVar->type = STRING;
+                    //     pos++;
+                    // } else {
+                    initializer = parseExpression(newVar.get());
+                    // } 
+
+                    newVar->hasInitializer = true;
                 }
 
                 if (command == REQUIRE_SEMICOLON && tokens[pos].type == SEMICOLON) {
@@ -627,7 +639,7 @@ private:
         return make_unique<AssignmentNode>(varName, move(expr));
     }
 
-    unique_ptr<ASTNode> parseExpression() {
+    unique_ptr<ASTNode> parseExpression(Variable * newVar = nullptr) {
         int typeFlags = 0x0; 
 
         auto left = parsePrimary();
@@ -643,10 +655,13 @@ private:
                 errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
                 throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
             }
+
+            Variable* rVar = retrieveVariable(varName);
+            typeFlags |= rVar->type;
         } else if (tokens[pos - 1].type == NUMBER) {
-            typeFlags |= 0x1 << 0;
+            typeFlags |= NUMBER;
         } else if (tokens[pos - 1].type == STRING) {
-            typeFlags |= 0x1 << 1;
+            typeFlags |= STRING;
         }
 
         while (tokens[pos].type == OPERATOR || tokens[pos].type == COMPARISON) {
@@ -665,14 +680,17 @@ private:
                     errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
                     throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
                 }
+
+                Variable* rVar = retrieveVariable(varName);
+                typeFlags |= rVar->type;
             } else if (tokens[pos - 1].type == NUMBER) {
-                typeFlags |= 0x1 << 0;
+                typeFlags |= NUMBER;
             }
             else if (tokens[pos - 1].type == STRING) {
-                typeFlags |= 0x1 << 1;
+                typeFlags |= STRING;
             }
 
-            if (typeFlags == 0x3) {
+            if (typeFlags == (NUMBER|STRING)) {
                 errorMessages.push_back("Error: Incompatible types\n");
                 throw runtime_error("Parsing stopped due to variable incompatible types.\n");
             }
@@ -682,6 +700,15 @@ private:
             } else {
                 left = make_unique<BinaryExpressionNode>(op, move(left), move(right));
             }
+        }
+
+        if (!(typeFlags == (NUMBER|STRING))) {
+            if (newVar) {
+                newVar->type = TokenType(typeFlags);
+            }
+        } else {
+            errorMessages.push_back("Error: Incompatible types\n");
+            throw runtime_error("Parsing stopped due to variable incompatible types.\n");
         }
 
         return left;
@@ -976,17 +1003,25 @@ private:
 
 int main() {
     string sourceCode = R"(
-        ipahayag x = 10;
-        ipahayag y = x;
-        ipahayag z;
+        ipahayag x = "HELLO";
+        ipahayag y = "WORLD";
+        ipahayag z = "KEK";
 
-        kapag (x < 10) {
-            z = x + y;
-        }
-        pag_iba_kung(y < 100) {
-            print(z);
-        }
+        ipahayag a = x + y + "hello";
+        z = a + x + y + z;
+        z = z + 10;
     )"; 
+
+    // ipahayag x = 10;
+    //     ipahayag y = x;
+    //     ipahayag z;
+
+    //     kapag (x < 10) {
+    //         z = x + y;
+    //     }
+    //     pag_iba_kung(y < 100) {
+    //         print(z);
+    //     }
 
     Lexer lexer(sourceCode);
     auto tokens = lexer.tokenize();
