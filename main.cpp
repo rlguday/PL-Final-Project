@@ -28,7 +28,8 @@ enum TokenType {
     COMMA,        //,
     STRING,
     PRINT,
-    UNKNOWN
+    UNKNOWN,
+    E_O_F
 };
 
 enum Command {
@@ -76,7 +77,6 @@ public:
     }
 };
 
-
 class UnaryOperationNode : public ASTNode {
 public:
     string varName;
@@ -96,7 +96,6 @@ public:
         cout << "STORE_VAR " << varName << endl;
     }
 };
-
 
 class PostfixNode : public ASTNode {
 public:
@@ -440,6 +439,13 @@ public:
 
                         continue;
                     }
+                } else if (source[pos] == '!') {
+                    if (pos + 1 < source.length() && source[pos + 1] == '=') {
+                        tokens.push_back({COMPARISON, "!="});
+                        pos += 2;
+
+                        continue;
+                    }
                 }
 
                 tokens.push_back({COMPARISON, string(1, source[pos])});
@@ -468,10 +474,9 @@ public:
                 pos++;
             }
         }
+        tokens.push_back({E_O_F, string(1, ' ')});
         return tokens;
     }
-
-
 
 private:
     string source;
@@ -523,7 +528,6 @@ private:
         return result;
     }
 
-
     string parseNumber() {
         string num;
         while (pos < source.length() && isdigit(source[pos])) {
@@ -554,9 +558,12 @@ public:
     vector<unique_ptr<ASTNode>> parse() {
         vector<unique_ptr<ASTNode>> ast;
 
+        string syntaxRequirement = "";
         try {
-            while (pos < tokens.size()) {
-                ast.push_back(move(parseStatement()));
+            while (tokens[pos].type != E_O_F) {
+                unique_ptr<ASTNode> statement = parseStatement(syntaxRequirement);
+
+                ast.push_back(move(statement));
             }
         } catch (const runtime_error &e) {
             cout << e.what() << endl;
@@ -579,9 +586,21 @@ private:
     size_t pos;
     vector<string> errorMessages;
 
-    unique_ptr<ASTNode> parseVariableDeclaration(Command command = REQUIRE_SEMICOLON) {
+    int movePositionBy(int incrementAmount) {
+        int tmp = pos + incrementAmount;
+        if (tmp >= tokens.size()) {
+            pos = tokens.size() - 1;
+        }
+        else {
+            pos += incrementAmount;
+        }
+
+        return pos;
+    }
+
+    unique_ptr<ASTNode> parseVariableDeclaration(string& syntaxRequirementOut, Command command = REQUIRE_SEMICOLON) {
         if (tokens[pos].type == IPAHAYAG) {
-            pos++; // skip ipahayag
+            movePositionBy(1); // skip ipahayag
 
             if (tokens[pos].type == IDENTIFIER) {
                 string varName = tokens[pos].value;
@@ -591,17 +610,17 @@ private:
                 }
                 
                 if (isVarDeclaredInCurrentScope(varName)) {
-                    errorMessages.push_back("Error: Variable '" + varName + "' is already declared in the current scope.\n");
-                    throw runtime_error("Parsing stopped due to variable '" + varName + "' redeclaration.");
+                    syntaxRequirementOut = "variable '" + varName + "' is already declared.";
+                    return nullptr;
                 }
 
-                pos++; // move after identifier
+                movePositionBy(1); // move after identifier
 
                 unique_ptr<ASTNode> initializer;
                 unique_ptr<Variable> newVar = make_unique<Variable>(varName, false, UNKNOWN);
 
                 if (tokens[pos].type == ASSIGNMENT) {
-                    pos++; // move after "="
+                    movePositionBy(1); // move after "="
 
                     initializer = parseExpression(newVar.get());
 
@@ -609,35 +628,34 @@ private:
                 }
 
                 if (command == REQUIRE_SEMICOLON && tokens[pos].type == SEMICOLON) {
-                    pos++;
+                    movePositionBy(1);;
                 } else if (command == REQUIRE_SEMICOLON) {
-                    errorMessages.push_back("Error: Missing semicolon after variable declaration.\n");
-                    throw runtime_error("Parsing stopped due to missing semicolon after assignment to variable '" + varName + "'.");
+                    syntaxRequirementOut = "requires ';'";
+                    return nullptr;
                 }
                 
                 declaredVariablesStack.back().push_back(move(newVar));
 
                 return make_unique<VariableDeclarationNode>(varName, move(initializer));
             } else {
-                errorMessages.push_back("Error: Expected identifier after 'ipahayag'.\n");
-                throw runtime_error("Parsing stopped due to missing variable name.");
+                syntaxRequirementOut = "requires variable name";
             }
         }
 
         return nullptr;
     }
 
-    unique_ptr<ASTNode> parseAssignment(Command command = REQUIRE_SEMICOLON) {
+    unique_ptr<ASTNode> parseAssignment(string& syntaxRequirementOut, Command command = REQUIRE_SEMICOLON) {
         string varName = tokens[pos].value;
 
         if (!isVariableDeclared(varName)) {
-            errorMessages.push_back("Error: Variable '" + varName + "' is not declared before assignment.");
-            throw runtime_error("Parsing stopped due to undeclared variable usage: '" + varName + "'.");
+            syntaxRequirementOut = "requires declaration of variable '" + varName + "'.";
+            return nullptr;
         }
 
         Variable *containerVar = retrieveVariable(varName);
 
-        pos += 2;
+        movePositionBy(2);;
         auto expr = parseExpression(nullptr, containerVar);
 
         setVariableIsInitialized(varName);
@@ -645,6 +663,9 @@ private:
         if (tokens[pos].type != SEMICOLON && command == REQUIRE_SEMICOLON) {
             errorMessages.push_back("Error: Missing semicolon after assignment to variable '" + varName + "'.");
             throw runtime_error("Parsing stopped due to missing semicolon after assignment to variable '" + varName + "'.");
+        }
+        else if (command == REQUIRE_SEMICOLON) {
+            movePositionBy(1);
         }
 
         return make_unique<AssignmentNode>(varName, move(expr));
@@ -688,7 +709,7 @@ private:
 
         while (tokens[pos].type == OPERATOR || tokens[pos].type == COMPARISON) {
             string op = tokens[pos].value;
-            pos++;
+            movePositionBy(1);
             auto right = parsePrimary();
 
             if (tokens[pos - 1].type == IDENTIFIER) {
@@ -747,26 +768,32 @@ private:
 
     unique_ptr<ASTNode> parsePrimary() {
         if (tokens[pos].type == NUMBER) {
-            return make_unique<NumberNode>(tokens[pos++].value);
+            unique_ptr<NumberNode> numNode = make_unique<NumberNode>(tokens[pos].value);
+            movePositionBy(1);
+            return numNode;
         } else if (tokens[pos].type == STRING) {
-            return make_unique<StringLiteralNode>(tokens[pos++].value);
+            unique_ptr<StringLiteralNode> stringLiteralNode = make_unique<StringLiteralNode>(tokens[pos].value);
+            movePositionBy(1);
+            return stringLiteralNode;
         } else if (tokens[pos].type == IDENTIFIER) {
-            return make_unique<VariableReferenceNode>(tokens[pos++].value);
+            unique_ptr<VariableReferenceNode> varRefNode = make_unique<VariableReferenceNode>(tokens[pos].value);
+            movePositionBy(1);
+            return varRefNode;
         }
         return nullptr;
     }
 
-    unique_ptr<ASTNode> parseConditional() {
-        pos++;
+    unique_ptr<ASTNode> parseConditional(string& syntaxRequirementOut) {
+        movePositionBy(1);
 
         if (tokens[pos].type == OPEN_PAREN) {
-            pos++;
+            movePositionBy(1);
             auto condition = parseExpression();
             if (tokens[pos].type == CLOSE_PAREN) {
-                pos++;
+                movePositionBy(1);
             } else {
-                errorMessages.push_back("Error: Missing closing parenthesis in conditional statement.");
-                throw runtime_error("Parsing stopped due to missing closing parenthesis.");
+                syntaxRequirementOut = "requires ')'";
+                return nullptr;
             }
 
             vector<unique_ptr<ASTNode>> ifBody;
@@ -775,26 +802,36 @@ private:
             declaredVariablesStack.emplace_back();
 
             if (tokens[pos].type == OPEN_BRACE) {
-                pos++;
+                movePositionBy(1);
+
                 while (tokens[pos].type != CLOSE_BRACE) {
-                    ifBody.push_back(parseStatement());
+                    ifBody.push_back(parseStatement(syntaxRequirementOut));
                 }
-                pos++;
+
+                if (tokens[pos].type == CLOSE_BRACE) {
+                    movePositionBy(1); 
+                }
+                else {
+                    return nullptr;
+                }
+            } else {
+                syntaxRequirementOut = "requires '{'";
+                return nullptr;
             }
 
             declaredVariablesStack.pop_back();
 
             vector<pair<unique_ptr<ASTNode>, vector<unique_ptr<ASTNode>>>> elseIfBranches;
             while (tokens[pos].type == PAG_IBA_KUNG) {
-                pos++;
+                movePositionBy(1);
                 if (tokens[pos].type == OPEN_PAREN) {
-                    pos++;
+                    movePositionBy(1);
                     auto elseIfCondition = parseExpression();
                     if (tokens[pos].type == CLOSE_PAREN) {
-                        pos++;
+                        movePositionBy(1);
                     } else {
-                        errorMessages.push_back("Error: Missing closing parenthesis in else-if condition.");
-                        throw runtime_error("Parsing stopped due to missing closing parenthesis.");
+                        syntaxRequirementOut = "requires ')'";
+                        return nullptr;
                     }
 
                     vector<unique_ptr<ASTNode>> elseIfBody;
@@ -802,30 +839,51 @@ private:
                     declaredVariablesStack.emplace_back();
 
                     if (tokens[pos].type == OPEN_BRACE) {
-                        pos++;
+                        movePositionBy(1);
+
                         while (tokens[pos].type != CLOSE_BRACE) {
-                            elseIfBody.push_back(parseStatement());
+                            elseIfBody.push_back(parseStatement(syntaxRequirementOut));
                         }
-                        pos++;
+                        if (tokens[pos].type == CLOSE_BRACE) {
+                            movePositionBy(1);   
+                        }
+                        else {
+                            return nullptr;
+                        }
+                    } else {
+                        syntaxRequirementOut = "requires '{'";
+                        return nullptr;
                     }
 
                     declaredVariablesStack.pop_back();
 
                     elseIfBranches.push_back({move(elseIfCondition), move(elseIfBody)});
+                } else {
+                    syntaxRequirementOut = "requires '('";
+                    return nullptr;
                 }
             }
 
             if (tokens[pos].type == PAG_IBA) {
-                pos++;
+                movePositionBy(1);
 
                 declaredVariablesStack.emplace_back();
 
                 if (tokens[pos].type == OPEN_BRACE) {
-                    pos++;
+                    movePositionBy(1);
+                    
                     while (tokens[pos].type != CLOSE_BRACE) {
-                        elseBody.push_back(parseStatement());
+                        elseBody.push_back(parseStatement(syntaxRequirementOut));
                     }
-                    pos++;
+                    if (tokens[pos].type == CLOSE_BRACE) {
+                        movePositionBy(1); 
+                    }
+                    else {
+                        return nullptr;
+                    }
+                } else {
+                    syntaxRequirementOut = "requires '{'";
+                    return nullptr;
                 }
 
                 declaredVariablesStack.pop_back();
@@ -839,17 +897,22 @@ private:
 
             return node;
         }
-
-        return nullptr;
+        else {
+            syntaxRequirementOut = "requires '('";
+            return nullptr;
+        }
     }
 
-    unique_ptr<ASTNode> parseStatement(Command command = REQUIRE_SEMICOLON) {
-        if (tokens[pos].type == IPAHAYAG) return parseVariableDeclaration();
-        else if (tokens[pos].type == IDENTIFIER && tokens[pos + 1].type == ASSIGNMENT) return parseAssignment(command);
-        else if (tokens[pos].type == KAPAG) return parseConditional();
-        else if (tokens[pos].type == PARA_SA) return parseForLoop();
-        else if (tokens[pos].type == HABANG) return parseWhileLoop();
-        else if (tokens[pos].type == PRINT) return parsePrint();
+    unique_ptr<ASTNode> parseStatement(string& syntaxRequirementOut, Command command = REQUIRE_SEMICOLON) {
+        unique_ptr<ASTNode> statement = nullptr;
+
+        if (tokens[pos].type == IPAHAYAG) { statement = parseVariableDeclaration(syntaxRequirementOut);}
+        else if (tokens[pos].type == IDENTIFIER && tokens[pos + 1].type == ASSIGNMENT) 
+            { statement = parseAssignment(syntaxRequirementOut, command); }
+        else if (tokens[pos].type == KAPAG) { statement = parseConditional(syntaxRequirementOut); }
+        else if (tokens[pos].type == PARA_SA) { statement = parseForLoop(syntaxRequirementOut); }
+        else if (tokens[pos].type == HABANG) { statement = parseWhileLoop(syntaxRequirementOut); }
+        else if (tokens[pos].type == PRINT) { statement = parsePrint(syntaxRequirementOut); }
         else if (tokens[pos].type == IDENTIFIER &&
             (tokens[pos + 1].type == OPERATOR && (tokens[pos + 1].value == "++" || tokens[pos + 1].value == "--"))) {
             string varName = tokens[pos].value;
@@ -860,35 +923,48 @@ private:
             }
 
             string op = tokens[pos + 1].value;
-            pos += 2;
-            if (tokens[pos].type == SEMICOLON) pos++;
-            return make_unique<PostfixNode>(varName, op);
-        }
-        else {
-            pos++;
+            movePositionBy(2);
+
+            if (command == REQUIRE_SEMICOLON && tokens[pos].type == SEMICOLON) {
+                movePositionBy(1);
+            } 
+            else if (command == REQUIRE_SEMICOLON) {
+                syntaxRequirementOut = "requires ';'";
+            }
+            else {
+                statement = make_unique<PostfixNode>(varName, op);
+            }
         }
 
-        return nullptr;
+        if (!statement) {
+            // cout << tokens[pos].type << " " << tokens[pos].value << endl;
+            throw runtime_error(
+                "Parsing stopped due to unexpected token '" +
+                tokens[pos].value + "' after '" + tokens[pos-1].value + "' " + 
+                (syntaxRequirementOut != "" ? syntaxRequirementOut : ""));
+        }
+
+        return statement;
     }
 
-    unique_ptr<ASTNode> parseWhileLoop() {
-        pos++; 
+    unique_ptr<ASTNode> parseWhileLoop(string& syntaxRequirementOut) {
+        movePositionBy(1); 
         if (tokens[pos].type == OPEN_PAREN) {
-            pos++; 
+            movePositionBy(1);
 
             auto condition = parseExpression();
             if (tokens[pos].type == CLOSE_PAREN) {
-                pos++;
+                movePositionBy(1);
             }
 
             vector<unique_ptr<ASTNode>> body;
 
             if (tokens[pos].type == OPEN_BRACE) {
-                pos++;
+                movePositionBy(1);
                 while (tokens[pos].type != CLOSE_BRACE) {
-                    body.push_back(parseStatement()); 
+                    body.push_back(parseStatement(syntaxRequirementOut)); 
                 }
-                pos++;
+                movePositionBy(1);
             }
 
             return make_unique<WhileLoopNode>(move(condition), move(body));
@@ -896,11 +972,11 @@ private:
         return nullptr;
     }
 
-    unique_ptr<ASTNode> parseForLoop() {
-        pos++;  // Skip 'para_sa' token
+    unique_ptr<ASTNode> parseForLoop(string& syntaxRequirementOut) {
+        movePositionBy(1);  // Skip 'para_sa' token
 
         if (tokens[pos].type == OPEN_PAREN) {
-            pos++;  // Skip '('
+            movePositionBy(1);  // Skip '('
 
             // ---- New Scope for Loop Header ----
             declaredVariablesStack.emplace_back();
@@ -909,48 +985,54 @@ private:
             if (tokens[pos].type == IPAHAYAG) {
                 string varName = tokens[pos + 1].value;
 
-                initialization = parseVariableDeclaration(IGNORE_SEMICOLON);
+                initialization = parseVariableDeclaration(syntaxRequirementOut, IGNORE_SEMICOLON);
             } else {
-                initialization = parseAssignment(IGNORE_SEMICOLON);
+                initialization = parseAssignment(syntaxRequirementOut, IGNORE_SEMICOLON);
             }
 
             // Ensure semicolon after initialization
-            checkSemicolon(pos, "Parsing stopped due to missing semicolon at the end of para_sa initialization.");
-            pos++;
+            if (tokens[pos].type != SEMICOLON) {
+                syntaxRequirementOut = "requires ';'";
+                return nullptr;
+            }
+            movePositionBy(1);
 
             auto condition = parseExpression(); // Parse condition
 
             // Ensure semicolon after condition
-            checkSemicolon(pos, "Parsing stopped due to missing semicolon at the end of para_sa test condition.");
-            pos++;
+            if (tokens[pos].type != SEMICOLON) {
+                syntaxRequirementOut = "requires ';'";
+                return nullptr;
+            }
+            movePositionBy(1);
 
             // Parse expression
-            unique_ptr<ASTNode> increment = parseStatement(IGNORE_SEMICOLON);
+            unique_ptr<ASTNode> increment = parseStatement(syntaxRequirementOut, IGNORE_SEMICOLON);
 
             if (tokens[pos].type != CLOSE_PAREN) {
-                errorMessages.push_back("Error: Missing closing parenthesis ')' in 'para_sa' loop.");
-                throw runtime_error("Parsing stopped due to missing closing parenthesis.");
+                syntaxRequirementOut = "requires ')'";
+                return nullptr;
             }
-            pos++;
+            movePositionBy(1);
 
             vector<unique_ptr<ASTNode>> body;
 
             // New Scope for Loop Body
             if (tokens[pos].type == OPEN_BRACE) {
-                pos++;  // Skip '{'
+                movePositionBy(1);  // Skip '{'
 
                 declaredVariablesStack.emplace_back();  // Push new scope for loop body
                 int i = 0;
                 while (tokens[pos].type != CLOSE_BRACE) {
-                    body.push_back(parseStatement());
+                    body.push_back(parseStatement(syntaxRequirementOut));
                 }
 
-                pos++;  // Skip '}'
+                movePositionBy(1);  // Skip '}'
 
                 declaredVariablesStack.pop_back();  // Pop loop body scope
             } else {
-                errorMessages.push_back("Error: Missing '{' for the body of 'para_sa' loop.");
-                throw runtime_error("Parsing stopped due to missing loop body.");
+                syntaxRequirementOut = "requires '{'";
+                return nullptr;
             }
 
             declaredVariablesStack.pop_back();  // Pop loop header scope
@@ -962,74 +1044,72 @@ private:
             loopNode->body = move(body);
 
             return loopNode;
+        } else {
+            syntaxRequirementOut = "requires '('";
+            return nullptr;
         }
 
-        errorMessages.push_back("Error: Missing opening parenthesis '(' in 'para_sa' loop.");
-        throw runtime_error("Parsing stopped due to invalid loop syntax.");
     }
 
-    unique_ptr<ASTNode> parsePrint() {
-        pos++;
+    unique_ptr<ASTNode> parsePrint(string& syntaxRequirementOut) {
+        movePositionBy(1);
         
         if (tokens[pos].type != OPEN_PAREN) {
-            errorMessages.push_back("Error: Missing opening parenthesis '(' after 'print'.");
-            throw runtime_error("Parsing stopped due to missing '(' after 'print'.");
+            syntaxRequirementOut = "requires '('";
+            return nullptr;
         }
-        pos++;
+        movePositionBy(1);
 
         vector<unique_ptr<ASTNode>> arguments;
 
         while (tokens[pos].type != CLOSE_PAREN) {
             if (tokens[pos].type == STRING) {
                 arguments.push_back(make_unique<StringLiteralNode>(tokens[pos].value));
-                pos++;
+                movePositionBy(1);
             } else if (tokens[pos].type == IDENTIFIER) {
                 string varName = tokens[pos].value;
+
                 if (!isVariableDeclared(varName)) {
-                    errorMessages.push_back("Error: Variable '" + varName + "' is not declared before using postfix operation.\n");
-                    throw runtime_error("Parsing stopped due to usage of undeclared variable '" + varName + "'. qweqwe");
+                    syntaxRequirementOut = "variable '" + varName + "' already declared.";
+                    return nullptr;
                 }
+
                 if (!isVariableInitialized(varName)) {
-                    errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
-                    throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
+                    syntaxRequirementOut = "requires initialization of variable '" + varName + "'.";
+                    return nullptr;
                 }
+
                 arguments.push_back(make_unique<VariableReferenceNode>(tokens[pos].value));
-                pos++;
+
+                movePositionBy(1);
             } else {
-                errorMessages.push_back("Error: Unexpected token in print statement.");
-                throw runtime_error("Parsing stopped due to unexpected token in print statement.");
+                syntaxRequirementOut = "";
+                return nullptr;
             }
 
             if (tokens[pos].type == COMMA) {
-                pos++; 
+                movePositionBy(1); 
             }
         }
 
         // Expect a closing parenthesis ')'
         if (tokens[pos].type != CLOSE_PAREN) {
-            errorMessages.push_back("Error: Missing closing parenthesis ')' in print statement.");
-            throw runtime_error("Parsing stopped due to missing ')'.");
+            syntaxRequirementOut = "requires ')'";
+            return nullptr;
         }
-        pos++;  // Skip the ')'
+        movePositionBy(1);  // Skip the ')'
 
         // Expect a semicolon after the print statement
         if (tokens[pos].type != SEMICOLON) {
-            errorMessages.push_back("Error: Missing semicolon after print statement.");
-            throw runtime_error("Parsing stopped due to missing semicolon.");
+            syntaxRequirementOut = "requires ';'";
+            return nullptr;
         }
-        pos++;  // Skip the semicolon
+        movePositionBy(1);  // Skip the semicolon
 
         // Return the PrintNode with the parsed arguments
         return make_unique<PrintNode>(move(arguments));
     }
 
-
-    void checkSemicolon(int pos, string msg = "") {
-        if (tokens[pos].type != SEMICOLON) {
-            errorMessages.push_back("Error: Missing semicolon at the end of the statement.");
-            throw runtime_error(msg);
-        }
-    }
 };
 
 int main() {
@@ -1060,7 +1140,11 @@ int main() {
             } pag_iba {
                 print("Factorial result is less than 100");
             }
-        } kung_hindi {
+
+            para_sa(ipahayag x = 0; x <= 9; x++) {
+                print("hello ", x);
+            }
+        } pag_iba {
             print("Sum is less than 15");
         }
 
@@ -1074,6 +1158,7 @@ int main() {
         } pag_iba {
             print("x is less than y");
         }
+
     )"; 
 
     Lexer lexer(sourceCode);
