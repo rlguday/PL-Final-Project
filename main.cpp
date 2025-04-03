@@ -123,7 +123,7 @@ public:
     void generateBytecode(int &labelCounter) const override {
         cout << "DECLARE_VAR " << varName << endl;
 
-        if (initializer) {
+        if(initializer) {
             initializer->generateBytecode(labelCounter);
             cout << "ASSIGN " << varName << endl;
         }
@@ -227,7 +227,7 @@ public:
         cout << "JUMP_IF_FALSE ELSE_" << elseLabel << endl;
 
         for (const auto &stmt : ifBody) {
-            if (stmt) stmt->generateBytecode(labelCounter);
+            stmt->generateBytecode(labelCounter);
         }
         cout << "JUMP END_IF_" << endLabel << endl;
 
@@ -238,7 +238,7 @@ public:
             cout << "JUMP_IF_FALSE ELSE_" << nextElseLabel << endl;
 
             for (const auto &stmt : elseIfBranch.second) {
-                if (stmt) stmt->generateBytecode(labelCounter);
+                stmt->generateBytecode(labelCounter);
             }
             cout << "JUMP END_IF_" << endLabel << endl;
             elseLabel = nextElseLabel;
@@ -246,7 +246,7 @@ public:
 
         cout << "ELSE_" << elseLabel << ":" << endl;
         for (const auto &stmt : elseBody) {
-            if (stmt) stmt->generateBytecode(labelCounter);
+            stmt->generateBytecode(labelCounter);
         }
 
         cout << "END_IF_" << endLabel << ":" << endl;
@@ -610,7 +610,7 @@ private:
                 }
                 
                 if (isVarDeclaredInCurrentScope(varName)) {
-                    syntaxRequirementOut = "variable '" + varName + "' is already declared.";
+                    syntaxRequirementOut = "| REASON: variable '" + varName + "' is already declared.";
                     return nullptr;
                 }
 
@@ -622,7 +622,11 @@ private:
                 if (tokens[pos].type == ASSIGNMENT) {
                     movePositionBy(1); // move after "="
 
-                    initializer = parseExpression(newVar.get());
+                    initializer = parseExpression(syntaxRequirementOut, newVar.get());
+
+                    if (!initializer) {
+                        return nullptr;
+                    }
 
                     newVar->hasInitializer = true;
                 }
@@ -630,7 +634,7 @@ private:
                 if (command == REQUIRE_SEMICOLON && tokens[pos].type == SEMICOLON) {
                     movePositionBy(1);;
                 } else if (command == REQUIRE_SEMICOLON) {
-                    syntaxRequirementOut = "requires ';'";
+                    syntaxRequirementOut = "| REASON: requires ';'";
                     return nullptr;
                 }
                 
@@ -638,7 +642,7 @@ private:
 
                 return make_unique<VariableDeclarationNode>(varName, move(initializer));
             } else {
-                syntaxRequirementOut = "requires variable name";
+                syntaxRequirementOut = "| REASON: requires variable name";
             }
         }
 
@@ -649,20 +653,24 @@ private:
         string varName = tokens[pos].value;
 
         if (!isVariableDeclared(varName)) {
-            syntaxRequirementOut = "requires declaration of variable '" + varName + "'.";
+            syntaxRequirementOut = "| REASON: requires declaration of variable '" + varName + "'.";
             return nullptr;
         }
 
         Variable *containerVar = retrieveVariable(varName);
 
         movePositionBy(2);;
-        auto expr = parseExpression(nullptr, containerVar);
+        auto expr = parseExpression(syntaxRequirementOut, nullptr, containerVar);
+
+        if (!expr) {
+            return nullptr;
+        }
 
         setVariableIsInitialized(varName);
 
         if (tokens[pos].type != SEMICOLON && command == REQUIRE_SEMICOLON) {
-            errorMessages.push_back("Error: Missing semicolon after assignment to variable '" + varName + "'.");
-            throw runtime_error("Parsing stopped due to missing semicolon after assignment to variable '" + varName + "'.");
+            syntaxRequirementOut = "| REASON: requires semicolon after assignment to variable '" + varName + "'.";
+            return nullptr;
         }
         else if (command == REQUIRE_SEMICOLON) {
             movePositionBy(1);
@@ -671,7 +679,7 @@ private:
         return make_unique<AssignmentNode>(varName, move(expr));
     }
 
-    unique_ptr<ASTNode> parseExpression(Variable * newVar = nullptr, Variable *containerVar = nullptr) {
+    unique_ptr<ASTNode> parseExpression(string& syntaxRequirementOut, Variable * newVar = nullptr, Variable *containerVar = nullptr) {
         int typeFlags = 0x0; 
 
         if (containerVar  && (containerVar->type != UNKNOWN)) {
@@ -683,13 +691,13 @@ private:
         if (tokens[pos - 1].type == IDENTIFIER) {
             string varName = tokens[pos - 1].value;
             if (!isVariableDeclared(varName)) {
-                errorMessages.push_back("Error: Variable '" + varName + "' is not declared before use.\n");
-                throw runtime_error("Parsing stopped due to variable '" + varName + "' is not declared before use.\n");
+                syntaxRequirementOut = "| REASON: requires declaration of variable '" + varName + "'.";
+                return nullptr;
             }
 
             if (!isVariableInitialized(varName)) {
-                errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
-                throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
+                syntaxRequirementOut = "| REASON: requires initialization of variable '" + varName + "'.";
+                return nullptr;
             }
 
             Variable* rVar = retrieveVariable(varName);
@@ -698,8 +706,8 @@ private:
                 typeFlags |= rVar->type;
             }
             else {
-                errorMessages.push_back("Error: Variable '" + rVar->varName + "' is declared but not initialized.");
-                throw runtime_error("Parsing stopped due to uninitialized variable '" + rVar->varName + "' usage.");
+                syntaxRequirementOut = "| REASON: requires initialization of variable '" + varName + "'.";
+                return nullptr;
             }
         } else if (tokens[pos - 1].type == NUMBER) {
             typeFlags |= NUMBER;
@@ -715,13 +723,13 @@ private:
             if (tokens[pos - 1].type == IDENTIFIER) {
                 string varName = tokens[pos - 1].value;
                 if (!isVariableDeclared(varName)) {
-                    errorMessages.push_back("Error: Variable '" + varName + "' is not declared before use.\n");
-                    throw runtime_error("Parsing stopped due to variable '" + varName + "' is not declared before use.\n");
+                    syntaxRequirementOut = "| REASON: requires declaration of variable '" + varName + "'.";
+                    return nullptr;
                 }
 
                 if (!isVariableInitialized(varName)) {
-                    errorMessages.push_back("Error: Variable '" + varName + "' is declared but not initialized.");
-                    throw runtime_error("Parsing stopped due to uninitialized variable '" + varName + "' usage.");
+                    syntaxRequirementOut = "| REASON: requires initialization of variable '" + varName + "'.";
+                    return nullptr;
                 }
 
                 Variable* rVar = retrieveVariable(varName);
@@ -729,8 +737,8 @@ private:
                     typeFlags |= rVar->type;
                 }
                 else {
-                    errorMessages.push_back("Error: Variable '" + rVar->varName + "' is declared but not initialized.");
-                    throw runtime_error("Parsing stopped due to uninitialized variable '" + rVar->varName + "' usage.");
+                    syntaxRequirementOut = "| REASON: requires initialization of variable '" + varName + "'.";
+                    return nullptr;
                 }
             } else if (tokens[pos - 1].type == NUMBER) {
                 typeFlags |= NUMBER;
@@ -741,8 +749,8 @@ private:
 
 
             if (typeFlags == (NUMBER|STRING)) {
-                errorMessages.push_back("Error: Incompatible types\n");
-                throw runtime_error("Parsing stopped due to variable incompatible types.\n");
+                syntaxRequirementOut = "| REASON: variable incompatible types.";
+                return nullptr;
             }
 
             if (tokens[pos - 2].type == COMPARISON) {
@@ -760,8 +768,8 @@ private:
                 containerVar->type = TokenType(typeFlags);
             }
         } else {
-            errorMessages.push_back("Error: Incompatible types\n");
-            throw runtime_error("Parsing stopped due to variable incompatible types.\n");
+            syntaxRequirementOut = "| REASON: variable '" + containerVar->varName +"' incompatible types.";
+            return nullptr;
         }
         return left;
     }
@@ -788,11 +796,16 @@ private:
 
         if (tokens[pos].type == OPEN_PAREN) {
             movePositionBy(1);
-            auto condition = parseExpression();
+
+            auto condition = parseExpression(syntaxRequirementOut);
+            if (!condition) {
+                return nullptr;
+            }
+
             if (tokens[pos].type == CLOSE_PAREN) {
                 movePositionBy(1);
             } else {
-                syntaxRequirementOut = "requires ')'";
+                syntaxRequirementOut = "| REASON: requires ')'";
                 return nullptr;
             }
 
@@ -815,7 +828,7 @@ private:
                     return nullptr;
                 }
             } else {
-                syntaxRequirementOut = "requires '{'";
+                syntaxRequirementOut = "| REASON: requires '{'";
                 return nullptr;
             }
 
@@ -826,11 +839,17 @@ private:
                 movePositionBy(1);
                 if (tokens[pos].type == OPEN_PAREN) {
                     movePositionBy(1);
-                    auto elseIfCondition = parseExpression();
+
+                    auto elseIfCondition = parseExpression(syntaxRequirementOut);
+
+                    if (!elseIfCondition) {
+                        return nullptr;
+                    }
+
                     if (tokens[pos].type == CLOSE_PAREN) {
                         movePositionBy(1);
                     } else {
-                        syntaxRequirementOut = "requires ')'";
+                        syntaxRequirementOut = "| REASON: requires ')'";
                         return nullptr;
                     }
 
@@ -851,7 +870,7 @@ private:
                             return nullptr;
                         }
                     } else {
-                        syntaxRequirementOut = "requires '{'";
+                        syntaxRequirementOut = "| REASON: requires '{'";
                         return nullptr;
                     }
 
@@ -859,7 +878,7 @@ private:
 
                     elseIfBranches.push_back({move(elseIfCondition), move(elseIfBody)});
                 } else {
-                    syntaxRequirementOut = "requires '('";
+                    syntaxRequirementOut = "| REASON: requires '('";
                     return nullptr;
                 }
             }
@@ -882,7 +901,7 @@ private:
                         return nullptr;
                     }
                 } else {
-                    syntaxRequirementOut = "requires '{'";
+                    syntaxRequirementOut = "| REASON: requires '{'";
                     return nullptr;
                 }
 
@@ -898,7 +917,7 @@ private:
             return node;
         }
         else {
-            syntaxRequirementOut = "requires '('";
+            syntaxRequirementOut = "| REASON: requires '('";
             return nullptr;
         }
     }
@@ -918,8 +937,8 @@ private:
             string varName = tokens[pos].value;
 
             if (!isVariableDeclared(varName)) {
-                errorMessages.push_back("Error: Variable '" + varName + "' is not declared before using postfix operation.\n");
-                throw runtime_error("Parsing stopped due to usage of undeclared variable '" + varName + "'.");
+                syntaxRequirementOut = "| REASON: requires declaration of variable '" + varName + "'.";
+                return nullptr;
             }
 
             string op = tokens[pos + 1].value;
@@ -929,7 +948,7 @@ private:
                 movePositionBy(1);
             } 
             else if (command == REQUIRE_SEMICOLON) {
-                syntaxRequirementOut = "requires ';'";
+                syntaxRequirementOut = "| REASON: requires ';'";
             }
             else {
                 statement = make_unique<PostfixNode>(varName, op);
@@ -937,11 +956,10 @@ private:
         }
 
         if (!statement) {
-            // cout << tokens[pos].type << " " << tokens[pos].value << endl;
             throw runtime_error(
-                "Parsing stopped due to unexpected token '" +
-                tokens[pos].value + "' after '" + tokens[pos-1].value + "' " + 
-                (syntaxRequirementOut != "" ? syntaxRequirementOut : ""));
+                "Parsing stopped due to " +
+                (syntaxRequirementOut != "" ? syntaxRequirementOut : "") +
+                "| unexpected token '" + tokens[pos].value + "' after '" + tokens[pos-1].value + "'");
         }
 
         return statement;
@@ -952,7 +970,12 @@ private:
         if (tokens[pos].type == OPEN_PAREN) {
             movePositionBy(1);
 
-            auto condition = parseExpression();
+            auto condition = parseExpression(syntaxRequirementOut);
+
+            if (!condition) {
+                return nullptr;
+            }
+
             if (tokens[pos].type == CLOSE_PAREN) {
                 movePositionBy(1);
             }
@@ -992,16 +1015,16 @@ private:
 
             // Ensure semicolon after initialization
             if (tokens[pos].type != SEMICOLON) {
-                syntaxRequirementOut = "requires ';'";
+                syntaxRequirementOut = "| REASON: requires ';'";
                 return nullptr;
             }
             movePositionBy(1);
 
-            auto condition = parseExpression(); // Parse condition
+            auto condition = parseExpression(syntaxRequirementOut); // Parse condition
 
             // Ensure semicolon after condition
             if (tokens[pos].type != SEMICOLON) {
-                syntaxRequirementOut = "requires ';'";
+                syntaxRequirementOut = "| REASON: requires ';'";
                 return nullptr;
             }
             movePositionBy(1);
@@ -1010,7 +1033,7 @@ private:
             unique_ptr<ASTNode> increment = parseStatement(syntaxRequirementOut, IGNORE_SEMICOLON);
 
             if (tokens[pos].type != CLOSE_PAREN) {
-                syntaxRequirementOut = "requires ')'";
+                syntaxRequirementOut = "| REASON: requires ')'";
                 return nullptr;
             }
             movePositionBy(1);
@@ -1031,11 +1054,15 @@ private:
 
                 declaredVariablesStack.pop_back();  // Pop loop body scope
             } else {
-                syntaxRequirementOut = "requires '{'";
+                syntaxRequirementOut = "| REASON: requires '{'";
                 return nullptr;
             }
 
             declaredVariablesStack.pop_back();  // Pop loop header scope
+
+            if (!initialization || !condition || !increment) {
+                return nullptr;
+            }
 
             auto loopNode = make_unique<ForLoopNode>();
             loopNode->initialization = move(initialization);
@@ -1045,7 +1072,7 @@ private:
 
             return loopNode;
         } else {
-            syntaxRequirementOut = "requires '('";
+            syntaxRequirementOut = "| REASON: requires '('";
             return nullptr;
         }
 
@@ -1055,7 +1082,7 @@ private:
         movePositionBy(1);
         
         if (tokens[pos].type != OPEN_PAREN) {
-            syntaxRequirementOut = "requires '('";
+            syntaxRequirementOut = "| REASON: requires '('";
             return nullptr;
         }
         movePositionBy(1);
@@ -1070,12 +1097,12 @@ private:
                 string varName = tokens[pos].value;
 
                 if (!isVariableDeclared(varName)) {
-                    syntaxRequirementOut = "variable '" + varName + "' already declared.";
+                    syntaxRequirementOut = "| REASON: variable '" + varName + "' already declared.";
                     return nullptr;
                 }
 
                 if (!isVariableInitialized(varName)) {
-                    syntaxRequirementOut = "requires initialization of variable '" + varName + "'.";
+                    syntaxRequirementOut = "| REASON: requires initialization of variable '" + varName + "'.";
                     return nullptr;
                 }
 
@@ -1094,14 +1121,14 @@ private:
 
         // Expect a closing parenthesis ')'
         if (tokens[pos].type != CLOSE_PAREN) {
-            syntaxRequirementOut = "requires ')'";
+            syntaxRequirementOut = "| REASON: requires ')'";
             return nullptr;
         }
         movePositionBy(1);  // Skip the ')'
 
         // Expect a semicolon after the print statement
         if (tokens[pos].type != SEMICOLON) {
-            syntaxRequirementOut = "requires ';'";
+            syntaxRequirementOut = "| REASON: requires ';'";
             return nullptr;
         }
         movePositionBy(1);  // Skip the semicolon
@@ -1120,14 +1147,14 @@ int main() {
         ipahayag counter = 1;
 
         sum = a + b;
-        print("Sum: ", sum);
+        print("Sum: ");
 
         kapag (sum >= 15) {
             print("Sum is greater than or equal to 15");
             
-            ipahayag result = 1;
+            ipahayag result = 1 + sum;
             
-            habang (counter <= 5) {
+            habang (counter > 5) {
                 result = result * counter;
                 print("Factorial step: ", result);
                 counter = counter + 1;
