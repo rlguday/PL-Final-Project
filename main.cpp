@@ -270,8 +270,7 @@ public:
         cout << "JUMP_IF_FALSE LOOP_END_" << currentLabel << endl;
 
         for (const auto &stmt : body) {
-            if (stmt)
-                stmt->generateBytecode(labelCounter);
+            stmt->generateBytecode(labelCounter);
         }
 
         increment->generateBytecode(labelCounter);
@@ -688,8 +687,13 @@ private:
 
         auto left = parsePrimary();
 
+        if (!left) {
+            return nullptr;
+        }
+
         if (tokens[pos - 1].type == IDENTIFIER) {
             string varName = tokens[pos - 1].value;
+
             if (!isVariableDeclared(varName)) {
                 syntaxRequirementOut = "| REASON: requires declaration of variable '" + varName + "'.";
                 return nullptr;
@@ -717,8 +721,14 @@ private:
 
         while (tokens[pos].type == OPERATOR || tokens[pos].type == COMPARISON) {
             string op = tokens[pos].value;
+
             movePositionBy(1);
+
             auto right = parsePrimary();
+
+            if (!right) {
+                return nullptr;
+            }
 
             if (tokens[pos - 1].type == IDENTIFIER) {
                 string varName = tokens[pos - 1].value;
@@ -747,7 +757,6 @@ private:
                 typeFlags |= STRING;
             }
 
-
             if (typeFlags == (NUMBER|STRING)) {
                 syntaxRequirementOut = "| REASON: variable incompatible types.";
                 return nullptr;
@@ -771,6 +780,12 @@ private:
             syntaxRequirementOut = "| REASON: variable '" + containerVar->varName +"' incompatible types.";
             return nullptr;
         }
+
+        if (!left) {
+            syntaxRequirementOut = "nigarti";
+            return nullptr;
+        }
+
         return left;
     }
 
@@ -983,6 +998,8 @@ private:
             vector<unique_ptr<ASTNode>> body;
 
             if (tokens[pos].type == OPEN_BRACE) {
+                declaredVariablesStack.emplace_back();
+
                 movePositionBy(1);
                 while (tokens[pos].type != CLOSE_BRACE) {
                     body.push_back(parseStatement(syntaxRequirementOut)); 
@@ -1090,32 +1107,19 @@ private:
         vector<unique_ptr<ASTNode>> arguments;
 
         while (tokens[pos].type != CLOSE_PAREN) {
-            if (tokens[pos].type == STRING) {
-                arguments.push_back(make_unique<StringLiteralNode>(tokens[pos].value));
-                movePositionBy(1);
-            } else if (tokens[pos].type == IDENTIFIER) {
-                string varName = tokens[pos].value;
+            unique_ptr<ASTNode> expr = parseExpression(syntaxRequirementOut);
 
-                if (!isVariableDeclared(varName)) {
-                    syntaxRequirementOut = "| REASON: variable '" + varName + "' already declared.";
-                    return nullptr;
-                }
-
-                if (!isVariableInitialized(varName)) {
-                    syntaxRequirementOut = "| REASON: requires initialization of variable '" + varName + "'.";
-                    return nullptr;
-                }
-
-                arguments.push_back(make_unique<VariableReferenceNode>(tokens[pos].value));
-
-                movePositionBy(1);
-            } else {
-                syntaxRequirementOut = "";
+            if (!expr) {
                 return nullptr;
             }
 
+            arguments.push_back(move(expr));
+
             if (tokens[pos].type == COMMA) {
                 movePositionBy(1); 
+            }
+            else {
+                return nullptr;
             }
         }
 
@@ -1143,49 +1147,7 @@ int main() {
     string sourceCode = R"(
         ipahayag a = 5;
         ipahayag b = 10;
-        ipahayag sum;
-        ipahayag counter = 1;
-
-        sum = a + b;
-        print("Sum: ");
-
-        kapag (sum >= 15) {
-            print("Sum is greater than or equal to 15");
-            
-            ipahayag result = 1 + sum;
-            
-            habang (counter > 5) {
-                result = result * counter;
-                print("Factorial step: ", result);
-                counter = counter + 1;
-            }
-
-            kapag (result > 100) {
-                print("Factorial result is greater than 100");
-            } pag_iba_kung (result == 120) {
-                print("Factorial result is exactly 120!");
-            } pag_iba {
-                print("Factorial result is less than 100");
-            }
-
-            para_sa(ipahayag x = 0; x <= 9; x++) {
-                print("hello ", x);
-            }
-        } pag_iba {
-            print("Sum is less than 15");
-        }
-
-        ipahayag x = 20;
-        ipahayag y = 10;
-
-        kapag (x > y) {
-            print("x is greater than y");
-        } pag_iba_kung (x == y) {
-            print("x is equal to y");
-        } pag_iba {
-            print("x is less than y");
-        }
-
+        print("Sum: ", a + b);
     )"; 
 
     Lexer lexer(sourceCode);
@@ -1198,9 +1160,7 @@ int main() {
         cout << "Generated Bytecode:\n";
         int labelCounter = 0;
         for (const auto &node : ast) {
-            if (node) {
-                node->generateBytecode(labelCounter);
-            }
+            node->generateBytecode(labelCounter);
         }
     } else {
         cout << "No valid AST nodes generated.\n";
