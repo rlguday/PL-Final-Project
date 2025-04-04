@@ -1118,6 +1118,9 @@ private:
             if (tokens[pos].type == COMMA) {
                 movePositionBy(1); 
             }
+            else if (tokens[pos].type == CLOSE_PAREN) {
+                continue;
+            }
             else {
                 return nullptr;
             }
@@ -1147,7 +1150,133 @@ int main() {
     string sourceCode = R"(
         ipahayag a = 5;
         ipahayag b = 10;
-        print("Sum: ", a + b);
+        ipahayag sum;
+        ipahayag counter = 1;
+
+        sum = a + b;
+        print("Sum: ");
+
+        kapag (sum >= 15) {
+            print("Sum is greater than or equal to 15");
+            
+            ipahayag result = 1 + sum;
+            
+            habang (counter > 5) {
+                result = result * counter;
+                print("Factorial step: ", result);
+                counter = counter + 1;
+            }
+
+            kapag (result > 100) {
+                print("Factorial result is greater than 100");
+            } pag_iba_kung (result == 120) {
+                print("Factorial result is exactly 120!");
+            } pag_iba {
+                print("Factorial result is less than 100");
+            }
+
+            para_sa(ipahayag x = 0; x <= 9; x++) {
+                print("hello ", x);
+
+                ipahayag a = 1;
+                ipahayag b = 2;
+                ipahayag c = 3;
+                ipahayag sum = 0;
+
+                habang (a <= 2) {
+                    print("Outer loop a: ", a);
+                    
+                    ipahayag b = 1;
+
+                    habang (b <= 2) {
+                        print("-- Middle loop b: ", b);
+
+                        ipahayag c = 1;
+
+                        habang (c <= 2) {
+                            print("---- Inner loop c: ", c);
+                            
+                            kapag (a + b + c % 2 == 0) {
+                                print("------ Even sum found: ", a + b + c);
+                                sum = sum + a * b * c;
+                                
+                                kapag (sum > 5) {
+                                    print("-------- Sum exceeded 5, breaking...");
+                                }
+                            } pag_iba {
+                                print("------ Odd sum: ", a + b + c);
+                            }
+
+                            c = c + 1;
+                        }
+
+                        b = b + 1;
+                    }
+
+                    a = a + 1;
+                }
+
+                print("Final computed sum: ", sum);
+            }
+        } pag_iba {
+            print("Sum is less than 15");
+        }
+
+        ipahayag x = 20;
+        ipahayag y = 10;
+
+        kapag (x > y) {
+            print("x is greater than y");
+
+            ipahayag a = 5;
+            ipahayag b = 10;
+            ipahayag sum;
+            ipahayag counter = 1;
+
+            sum = a + b;
+            print("Sum: ");
+
+            kapag (sum >= 15) {
+                print("Sum is greater than or equal to 15");
+                
+                ipahayag result = 1 + sum;
+                
+                habang (counter > 5) {
+                    result = result * counter;
+                    print("Factorial step: ", result);
+                    counter = counter + 1;
+                }
+
+                kapag (result > 100) {
+                    print("Factorial result is greater than 100");
+                } pag_iba_kung (result == 120) {
+                    print("Factorial result is exactly 120!");
+                } pag_iba {
+                    print("Factorial result is less than 100");
+                }
+
+                para_sa(ipahayag x = 0; x <= 9; x++) {
+                    print("hello ", x);
+                }
+            } pag_iba {
+                print("Sum is less than 15");
+            }
+
+            ipahayag x = 20;
+            ipahayag y = 10;
+
+            kapag (x > y) {
+                print("x is greater than y");
+            } pag_iba_kung (x == y) {
+                print("x is equal to y");
+            } pag_iba {
+                print("x is less than y");
+            }
+        } pag_iba_kung (x == y) {
+            print("x is equal to y");
+        } pag_iba {
+            print("x is less than y");
+        }
     )"; 
 
     Lexer lexer(sourceCode);
